@@ -120,7 +120,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
     max_tokens: 700,
     top_p: 1,
     frequency_penalty: 0,
-    presence_penalty: 0,
+    presence_penalty: 0
   };
 
   try {
