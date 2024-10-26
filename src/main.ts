@@ -194,7 +194,7 @@ async function createReviewComment(
 }
 
 async function main() {
-  core.debug("HCS")
+  core.info("HCS")
   const prDetails = await getPRDetails();
   let diff: string | null;
   
