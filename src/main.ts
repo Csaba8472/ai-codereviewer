@@ -24,8 +24,13 @@ interface PRDetails {
 }
 
 async function getPRDetails(): Promise<PRDetails> {
+
+  let content = readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
+  core.debug("core.debug(content)")
+  core.debug(content)
+
   const { repository, number } = JSON.parse(
-    readFileSync(process.env.GITHUB_EVENT_PATH || "", "utf8")
+    content
   );
   const prResponse = await octokit.pulls.get({
     owner: repository.owner.login,
@@ -191,8 +196,13 @@ async function createReviewComment(
 async function main() {
   const prDetails = await getPRDetails();
   let diff: string | null;
+  
+  let content = readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
+  core.debug("core.debug(content)")
+  core.debug(content)
+  
   const eventData = JSON.parse(
-    readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
+    content
   );
 
   if (eventData.action === "opened") {
