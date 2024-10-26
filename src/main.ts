@@ -87,7 +87,6 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
 - Write the comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
 - IMPORTANT: NEVER suggest adding comments to the code.
-- IMPORTANT: Do not wrap the json codes in JSON markers
 
 Review the following code diff in the file "${
     file.to
@@ -139,7 +138,13 @@ async function getAIResponse(prompt: string): Promise<Array<{
     });
 
     const res = response.choices[0].message?.content?.trim() || "{}";
-    return JSON.parse(res).reviews;
+
+    if (res.startsWith("```json")) {
+      return JSON.parse(res.slice(7, -3)).reviews
+    } else {
+      return JSON.parse(res).reviews;
+    }
+
   } catch (error) {
     console.error("Error:", error);
     return null;
