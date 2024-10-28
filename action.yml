@@ -10,11 +10,15 @@ inputs:
   OPENAI_API_MODEL:
     description: "OpenAI API model."
     required: false
-    default: "gpt-4"
+    default: "gpt-4o"
   exclude:
     description: "Glob patterns to exclude files from the diff analysis"
     required: false
     default: ""
+  role:
+    description: "AI's role eg: senior android developer"
+    required: false
+    default: "senior developer"
 runs:
   using: "node16"
   main: "dist/index.js"
