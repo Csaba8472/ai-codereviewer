@@ -80,6 +80,7 @@ async function analyzeCode(
 
 function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
   return `Your task is to review pull requests. Instructions:
+- Do not wrap the json codes in JSON markers
 - Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
 - Do not give positive comments or compliments.
 - Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
@@ -120,16 +121,14 @@ async function getAIResponse(prompt: string): Promise<Array<{
     max_tokens: 700,
     top_p: 1,
     frequency_penalty: 0,
-    presence_penalty: 0,
+    presence_penalty: 0
   };
 
   try {
     const response = await openai.chat.completions.create({
       ...queryConfig,
       // return JSON if the model supports it:
-      ...(OPENAI_API_MODEL === "gpt-4-1106-preview"
-        ? { response_format: { type: "json_object" } }
-        : {}),
+      ...({ response_format: { type: "json_object" } }),
       messages: [
         {
           role: "system",
@@ -139,7 +138,13 @@ async function getAIResponse(prompt: string): Promise<Array<{
     });
 
     const res = response.choices[0].message?.content?.trim() || "{}";
-    return JSON.parse(res).reviews;
+
+    if (res.startsWith("```json")) {
+      return JSON.parse(res.slice(7, -3)).reviews
+    } else {
+      return JSON.parse(res).reviews;
+    }
+
   } catch (error) {
     console.error("Error:", error);
     return null;
