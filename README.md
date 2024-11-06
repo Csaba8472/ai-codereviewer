@@ -54,6 +54,8 @@ jobs:
 
 6. Commit the changes to your repository, and AI Code Reviewer will start working on your future pull requests.
 
+7. Execute `bun run package` to generate the package.
+
 ## How It Works
 
 The AI Code Reviewer GitHub Action retrieves the pull request diff, filters out excluded files, and sends code chunks to
