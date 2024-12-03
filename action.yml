@@ -19,6 +19,10 @@ inputs:
     description: "AI's role eg: senior android developer"
     required: false
     default: "senior developer"
+  tech_stack:
+    description: "Project's tech stack to pass to AI"
+    required: false
+    default: ""
 runs:
   using: "node16"
   main: "dist/index.js"

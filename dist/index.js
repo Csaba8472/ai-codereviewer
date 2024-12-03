@@ -52,6 +52,7 @@ const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
 const OPENAI_API_KEY = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL");
 const role = core.getInput("role");
+const tech_stack = core.getInput("tech_stack");
 const octokit = new rest_1.Octokit({ auth: GITHUB_TOKEN });
 const openai = new openai_1.default({
     apiKey: OPENAI_API_KEY,
@@ -107,7 +108,8 @@ function analyzeCode(parsedDiff, prDetails) {
     });
 }
 function createPrompt(file, chunk, prDetails) {
-    return `You are a ${role}. Your task is to review pull requests. Instructions:
+    return `You are a ${role}. Your task is to review pull requests. Project's tech stack is ${tech_stack}.
+  Instructions:
 - Do not wrap the json codes in JSON markers
 - Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
 - Do not give positive comments or compliments.
