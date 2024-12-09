@@ -44,6 +44,33 @@ async function getPRDetails(): Promise<PRDetails> {
   };
 }
 
+async function getFileContent(
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string
+): Promise<string | null> {
+  try {
+    const response = await octokit.repos.getContent({
+      owner,
+      repo,
+      path,
+      ref,
+    });
+    
+    // @ts-expect-error - response.data can be an array or an object
+    if (response.data.content) {
+      // Content is base64 encoded
+      // @ts-expect-error - response.data can be an array or an object
+      return Buffer.from(response.data.content, 'base64').toString();
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error getting file content: ${error}`);
+    return null;
+  }
+}
+
 async function getDiff(
   owner: string,
   repo: string,
@@ -68,8 +95,17 @@ async function analyzeCode(
 
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue; // Ignore deleted files
+    
+    // Get the full file content
+    const fileContent = await getFileContent(
+      prDetails.owner,
+      prDetails.repo,
+      file.to!,
+      `pull/${prDetails.pull_number}/head`
+    );
+
     for (const chunk of file.chunks) {
-      const prompt = createPrompt(file, chunk, prDetails, prIgnore);
+      const prompt = createPrompt(file, chunk, prDetails, prIgnore, fileContent);
       const aiResponse = await getAIResponse(prompt);
       if (aiResponse) {
         const newComments = createComment(file, chunk, aiResponse);
@@ -82,7 +118,13 @@ async function analyzeCode(
   return comments;
 }
 
-function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails, prIgnore: string): string {
+function createPrompt(
+  file: File, 
+  chunk: Chunk, 
+  prDetails: PRDetails, 
+  prIgnore: string,
+  fullFileContent: string | null
+): string {
   return `You are a ${role}. Your task is to review pull requests. Project's tech stack is ${tech_stack}.
   Instructions:
 - Do not wrap the json codes in JSON markers
@@ -97,18 +139,17 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails, prIgnore: 
 Ignore these items from the PR:
 ${prIgnore}
 
-Review the following code diff in the file "${
-    file.to
-  }" and take the pull request title and description into account when writing the response.
-  
-Pull request title: ${prDetails.title}
-Pull request description:
+Review the following code in the file "${file.to}".
 
----
-${prDetails.description}
----
+Full file content:
+\`\`\`
+${fullFileContent ? (fullFileContent.length > 10000 ? 
+  fullFileContent.slice(0, 5000) + '\n... (content truncated) ...\n' + fullFileContent.slice(-5000) 
+  : fullFileContent) 
+  : 'File content not available'}
+\`\`\`
 
-Git diff to review:
+Changes in this chunk:
 
 \`\`\`diff
 ${chunk.content}
