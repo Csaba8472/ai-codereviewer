@@ -23,6 +23,10 @@ inputs:
     description: "Project's tech stack to pass to AI"
     required: false
     default: ""
+  pr_ignore:
+    description: ".prignore file to list things to exclude from review"
+    required: false
+    default: ""
 runs:
   using: "node16"
   main: "dist/index.js"

@@ -10,6 +10,7 @@ const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
 const role: string = core.getInput("role");
 const tech_stack: string = core.getInput("tech_stack");
+const prIgnore: string = core.getMultilineInput("pr_ignore").map(customPrompt => `- ${customPrompt}`).join("\n")
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -60,14 +61,15 @@ async function getDiff(
 
 async function analyzeCode(
   parsedDiff: File[],
-  prDetails: PRDetails
+  prDetails: PRDetails,
+  prIgnore: string
 ): Promise<Array<{ body: string; path: string; line: number }>> {
   const comments: Array<{ body: string; path: string; line: number }> = [];
 
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue; // Ignore deleted files
     for (const chunk of file.chunks) {
-      const prompt = createPrompt(file, chunk, prDetails);
+      const prompt = createPrompt(file, chunk, prDetails, prIgnore);
       const aiResponse = await getAIResponse(prompt);
       if (aiResponse) {
         const newComments = createComment(file, chunk, aiResponse);
@@ -80,7 +82,7 @@ async function analyzeCode(
   return comments;
 }
 
-function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
+function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails, prIgnore: string): string {
   return `You are a ${role}. Your task is to review pull requests. Project's tech stack is ${tech_stack}.
   Instructions:
 - Do not wrap the json codes in JSON markers
@@ -91,6 +93,9 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
 - Write the comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
 - IMPORTANT: NEVER suggest adding comments to the code.
+
+Ignore these items from the PR:
+${prIgnore}
 
 Review the following code diff in the file "${
     file.to
@@ -247,7 +252,7 @@ async function main() {
     );
   });
 
-  const comments = await analyzeCode(filteredDiff, prDetails);
+  const comments = await analyzeCode(filteredDiff, prDetails, prIgnore);
   if (comments.length > 0) {
     await createReviewComment(
       prDetails.owner,
