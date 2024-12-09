@@ -139,7 +139,27 @@ function createPrompt(
 Ignore these items from the PR:
 ${prIgnore}
 
-Review the following code in the file "${file.to}".
+Review the following code diff in the file "${
+    file.to
+  }" and take the pull request title and description into account when writing the response.
+  
+Pull request title: ${prDetails.title}
+Pull request description:
+
+---
+${prDetails.description}
+---
+
+Git diff to review:
+
+\`\`\`diff
+${chunk.content}
+${chunk.changes
+  // @ts-expect-error - ln and ln2 exists where needed
+  .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
+  .join("\n")}
+\`\`\`
+
 
 Full file content:
 \`\`\`
@@ -149,15 +169,6 @@ ${fullFileContent ? (fullFileContent.length > 10000 ?
   : 'File content not available'}
 \`\`\`
 
-Changes in this chunk:
-
-\`\`\`diff
-${chunk.content}
-${chunk.changes
-  // @ts-expect-error - ln and ln2 exists where needed
-  .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
-  .join("\n")}
-\`\`\`
 `;
 }
 
