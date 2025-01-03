@@ -1,22 +1,38 @@
 import { readFileSync } from "fs";
 import * as core from "@actions/core";
 import OpenAI from "openai";
+import Anthropic from '@anthropic-ai/sdk';
 import { Octokit } from "@octokit/rest";
 import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
 
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
+const AI_PROVIDER: string = core.getInput("AI_PROVIDER");
 const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
+const ANTHROPIC_API_KEY: string = core.getInput("ANTHROPIC_API_KEY");
+const ANTHROPIC_API_MODEL: string = core.getInput("ANTHROPIC_API_MODEL");
 const role: string = core.getInput("role");
 const tech_stack: string = core.getInput("tech_stack");
 const prIgnore: string = core.getMultilineInput("pr_ignore").map(customPrompt => `- ${customPrompt}`).join("\n")
 
+// Validate API keys based on provider
+if (AI_PROVIDER === 'openai' && !OPENAI_API_KEY) {
+  throw new Error('OPENAI_API_KEY is required when using OpenAI provider');
+}
+if (AI_PROVIDER === 'anthropic' && !ANTHROPIC_API_KEY) {
+  throw new Error('ANTHROPIC_API_KEY is required when using Anthropic provider');
+}
+
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
-const openai = new OpenAI({
+const openai = AI_PROVIDER === 'openai' ? new OpenAI({
   apiKey: OPENAI_API_KEY,
-});
+}) : null;
+
+const anthropic = AI_PROVIDER === 'anthropic' ? new Anthropic({
+  apiKey: ANTHROPIC_API_KEY,
+}) : null;
 
 interface PRDetails {
   owner: string;
@@ -176,36 +192,66 @@ async function getAIResponse(prompt: string): Promise<Array<{
   lineNumber: string;
   reviewComment: string;
 }> | null> {
-  const queryConfig = {
-    model: OPENAI_API_MODEL,
-    temperature: 0.2,
-    max_tokens: 700,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0
-  };
-
   try {
-    const response = await openai.chat.completions.create({
-      ...queryConfig,
-      // return JSON if the model supports it:
-      ...({ response_format: { type: "json_object" } }),
-      messages: [
-        {
-          role: "system",
-          content: prompt,
+    if (AI_PROVIDER === 'openai' && openai) {
+      const queryConfig = {
+        model: OPENAI_API_MODEL,
+        temperature: 0.2,
+        max_tokens: 700,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0
+      };
+
+      const response = await openai.chat.completions.create({
+        ...queryConfig,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: prompt,
+          },
+        ],
+      });
+
+      const res = response.choices[0].message?.content?.trim() || "{}";
+      if (res.startsWith("```json")) {
+        return JSON.parse(res.slice(7, -3)).reviews;
+      } else {
+        return JSON.parse(res).reviews;
+      }
+    } else if (AI_PROVIDER === 'anthropic' && anthropic) {
+      const response = await anthropic.messages.create({
+        model: ANTHROPIC_API_MODEL,
+        max_tokens: 1024,
+        temperature: 0.2,
+        messages: [
+          {
+            "role": "user", 
+            "content": "You are an AI code reviewer. You must respond in JSON format."
         },
-      ],
-    });
+        {
+            "role": "assistant",
+            "content": "Here is the JSON requested:\n{"
+        }
+        ],
+      });
 
-    const res = response.choices[0].message?.content?.trim() || "{}";
+      // Handle Anthropic's response format
+      const content = response.content[0];
+      if (content.type !== 'text') {
+        throw new Error('Unexpected response type from Anthropic API');
+      }
 
-    if (res.startsWith("```json")) {
-      return JSON.parse(res.slice(7, -3)).reviews
+      const res = content.text.trim();
+      if (res.startsWith("```json")) {
+        return JSON.parse(res.slice(7, -3)).reviews;
+      } else {
+        return JSON.parse(res).reviews;
+      }
     } else {
-      return JSON.parse(res).reviews;
+      throw new Error(`Invalid AI provider: ${AI_PROVIDER}`);
     }
-
   } catch (error) {
     console.error("Error:", error);
     return null;

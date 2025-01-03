@@ -1,7 +1,7 @@
 {
   "name": "open-ai-reviewer",
-  "version": "1.0.0",
-  "description": "Open AI powered code reviews",
+  "version": "1.1.0",
+  "description": "AI powered code reviews using OpenAI or Anthropic",
   "main": "lib/main.js",
   "author": "Ville Saukkonen",
   "license": "MIT",
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@actions/core": "^1.10.0",
+    "@anthropic-ai/sdk": "^0.32.1",
     "@octokit/rest": "^19.0.7",
     "minimatch": "^7.4.2",
     "openai": "^4.68.4",
