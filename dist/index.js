@@ -42,6 +42,16 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.anthropic = exports.openai = exports.octokit = void 0;
+exports.getConfig = getConfig;
+exports.getPRDetails = getPRDetails;
+exports.getFileContent = getFileContent;
+exports.getDiff = getDiff;
+exports.analyzeCode = analyzeCode;
+exports.createPrompt = createPrompt;
+exports.getAIResponse = getAIResponse;
+exports.createComment = createComment;
+exports.createReviewComment = createReviewComment;
 const fs_1 = __nccwpck_require__(7147);
 const core = __importStar(__nccwpck_require__(2186));
 const openai_1 = __importDefault(__nccwpck_require__(47));
@@ -49,55 +59,87 @@ const sdk_1 = __importDefault(__nccwpck_require__(1410));
 const rest_1 = __nccwpck_require__(5375);
 const parse_diff_1 = __importDefault(__nccwpck_require__(4833));
 const minimatch_1 = __importDefault(__nccwpck_require__(2002));
-const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
-const AI_PROVIDER = core.getInput("AI_PROVIDER");
-const OPENAI_API_KEY = core.getInput("OPENAI_API_KEY");
-const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL");
-const ANTHROPIC_API_KEY = core.getInput("ANTHROPIC_API_KEY");
-const ANTHROPIC_API_MODEL = core.getInput("ANTHROPIC_API_MODEL");
-const role = core.getInput("role");
-const tech_stack = core.getInput("tech_stack");
-const prIgnore = core.getMultilineInput("pr_ignore").map(customPrompt => `- ${customPrompt}`).join("\n");
+// Configuration can come from GitHub Actions or environment variables
+function getConfig() {
+    const isGitHubAction = !!process.env.GITHUB_ACTIONS;
+    return {
+        GITHUB_TOKEN: isGitHubAction ? core.getInput("GITHUB_TOKEN") : process.env.GITHUB_TOKEN,
+        AI_PROVIDER: isGitHubAction ? core.getInput("AI_PROVIDER") : process.env.AI_PROVIDER || 'openai',
+        OPENAI_API_KEY: isGitHubAction ? core.getInput("OPENAI_API_KEY") : process.env.OPENAI_API_KEY,
+        OPENAI_API_MODEL: isGitHubAction ? core.getInput("OPENAI_API_MODEL") : process.env.OPENAI_API_MODEL || 'gpt-4',
+        ANTHROPIC_API_KEY: isGitHubAction ? core.getInput("ANTHROPIC_API_KEY") : process.env.ANTHROPIC_API_KEY,
+        ANTHROPIC_API_MODEL: isGitHubAction ? core.getInput("ANTHROPIC_API_MODEL") : process.env.ANTHROPIC_API_MODEL || 'claude-3-opus-20240229',
+        role: isGitHubAction ? core.getInput("role") : process.env.ROLE || 'Senior Software Engineer',
+        tech_stack: isGitHubAction ? core.getInput("tech_stack") : process.env.TECH_STACK || 'TypeScript, JavaScript, Node.js',
+        prIgnore: isGitHubAction
+            ? core.getMultilineInput("pr_ignore").map(customPrompt => `- ${customPrompt}`).join("\n")
+            : (process.env.PR_IGNORE || '').split(',').map(line => `- ${line.trim()}`).join('\n')
+    };
+}
+const config = getConfig();
 // Validate API keys based on provider
-if (AI_PROVIDER === 'openai' && !OPENAI_API_KEY) {
+if (config.AI_PROVIDER === 'openai' && !config.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required when using OpenAI provider');
 }
-if (AI_PROVIDER === 'anthropic' && !ANTHROPIC_API_KEY) {
+if (config.AI_PROVIDER === 'anthropic' && !config.ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY is required when using Anthropic provider');
 }
-const octokit = new rest_1.Octokit({ auth: GITHUB_TOKEN });
-const openai = AI_PROVIDER === 'openai' ? new openai_1.default({
-    apiKey: OPENAI_API_KEY,
+exports.octokit = new rest_1.Octokit({ auth: config.GITHUB_TOKEN });
+exports.openai = config.AI_PROVIDER === 'openai' ? new openai_1.default({
+    apiKey: config.OPENAI_API_KEY,
 }) : null;
-const anthropic = AI_PROVIDER === 'anthropic' ? new sdk_1.default({
-    apiKey: ANTHROPIC_API_KEY,
+exports.anthropic = config.AI_PROVIDER === 'anthropic' ? new sdk_1.default({
+    apiKey: config.ANTHROPIC_API_KEY,
 }) : null;
-function getPRDetails() {
+function getPRDetails(prUrl) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b;
-        const eventPath = process.env.GITHUB_EVENT_PATH;
-        if (!eventPath) {
-            throw new Error('GITHUB_EVENT_PATH environment variable is not set');
+        var _a, _b, _c, _d;
+        if (prUrl) {
+            // Parse PR URL format: https://github.com/owner/repo/pull/number
+            const match = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+            if (!match) {
+                throw new Error('Invalid GitHub PR URL. Format should be: https://github.com/owner/repo/pull/number');
+            }
+            const [, owner, repo, pullNumber] = match;
+            const prResponse = yield exports.octokit.pulls.get({
+                owner,
+                repo,
+                pull_number: parseInt(pullNumber, 10),
+            });
+            return {
+                owner,
+                repo,
+                pull_number: parseInt(pullNumber, 10),
+                title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
+                description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
+            };
         }
-        const { repository, number } = JSON.parse((0, fs_1.readFileSync)(eventPath, "utf8"));
-        const prResponse = yield octokit.pulls.get({
-            owner: repository.owner.login,
-            repo: repository.name,
-            pull_number: number,
-        });
-        return {
-            owner: repository.owner.login,
-            repo: repository.name,
-            pull_number: number,
-            title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
-            description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
-        };
+        else {
+            // GitHub Actions context
+            const eventPath = process.env.GITHUB_EVENT_PATH;
+            if (!eventPath) {
+                throw new Error('GITHUB_EVENT_PATH environment variable is not set');
+            }
+            const { repository, number } = JSON.parse((0, fs_1.readFileSync)(eventPath, "utf8"));
+            const prResponse = yield exports.octokit.pulls.get({
+                owner: repository.owner.login,
+                repo: repository.name,
+                pull_number: number,
+            });
+            return {
+                owner: repository.owner.login,
+                repo: repository.name,
+                pull_number: number,
+                title: (_c = prResponse.data.title) !== null && _c !== void 0 ? _c : "",
+                description: (_d = prResponse.data.body) !== null && _d !== void 0 ? _d : "",
+            };
+        }
     });
 }
 function getFileContent(owner, repo, path, ref) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const response = yield octokit.repos.getContent({
+            const response = yield exports.octokit.repos.getContent({
                 owner,
                 repo,
                 path,
@@ -119,7 +161,7 @@ function getFileContent(owner, repo, path, ref) {
 }
 function getDiff(owner, repo, pull_number) {
     return __awaiter(this, void 0, void 0, function* () {
-        const response = yield octokit.pulls.get({
+        const response = yield exports.octokit.pulls.get({
             owner,
             repo,
             pull_number,
@@ -152,64 +194,71 @@ function analyzeCode(parsedDiff, prDetails, prIgnore) {
     });
 }
 function createPrompt(file, chunk, prDetails, prIgnore, fullFileContent) {
-    return `You are a ${role}. Your task is to review pull requests. Project's tech stack is ${tech_stack}.
-  Instructions:
-- Do not wrap the json codes in JSON markers
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
-- Do not give positive comments or compliments.
-- If suggestion has similar changes already in the code, don't mention that.
-- Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
-- Write the comment in GitHub Markdown format.
-- Use the given description only for the overall context and only comment the code.
-- IMPORTANT: NEVER suggest adding comments to the code.
-
-Ignore these items from the PR:
-${prIgnore}
-
-Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
-  
-Pull request title: ${prDetails.title}
-Pull request description:
-
----
-${prDetails.description}
----
-
-Git diff to review:
-
-\`\`\`diff
-${chunk.content}
-${chunk.changes
-        // @ts-expect-error - ln and ln2 exists where needed
-        .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
-        .join("\n")}
-\`\`\`
-
-
-Full file content:
-\`\`\`
-${fullFileContent ? (fullFileContent.length > 10000 ?
-        fullFileContent.slice(0, 5000) + '\n... (content truncated) ...\n' + fullFileContent.slice(-5000)
-        : fullFileContent)
-        : 'File content not available'}
-\`\`\`
-
-`;
+    // Sanitize inputs to prevent control characters
+    const sanitizeText = (text) => text.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+    const sanitizedTitle = sanitizeText(prDetails.title);
+    const sanitizedDescription = sanitizeText(prDetails.description);
+    const sanitizedContent = chunk.content ? sanitizeText(chunk.content) : '';
+    const sanitizedFileContent = fullFileContent ? sanitizeText(fullFileContent) : 'File content not available';
+    const sanitizedFilePath = file.to ? sanitizeText(file.to) : '';
+    // Sanitize all user-provided inputs
+    const sanitizedRole = sanitizeText(config.role);
+    const sanitizedTechStack = sanitizeText(config.tech_stack);
+    const sanitizedPrIgnore = sanitizeText(prIgnore);
+    return [
+        `You are a ${sanitizedRole}. Your task is to review pull requests. Project's tech stack is ${sanitizedTechStack}.`,
+        'Instructions:',
+        '- Do not wrap the json codes in JSON markers',
+        '- Provide the response in following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>"}]}',
+        '- Do not give positive comments or compliments.',
+        '- If suggestion has similar changes already in the code, don\'t mention that.',
+        '- Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.',
+        '- Write the comment in GitHub Markdown format.',
+        '- Use the given description only for the overall context and only comment the code.',
+        '- IMPORTANT: NEVER suggest adding comments to the code.',
+        '',
+        'Ignore these items from the PR:',
+        sanitizedPrIgnore,
+        '',
+        `Review the following code diff in the file "${sanitizedFilePath}" and take the pull request title and description into account when writing the response.`,
+        '',
+        `Pull request title: ${sanitizedTitle}`,
+        'Pull request description:',
+        '---',
+        sanitizedDescription,
+        '---',
+        '',
+        'Git diff to review:',
+        '```diff',
+        sanitizedContent,
+        chunk.changes
+            // @ts-expect-error - ln and ln2 exists where needed
+            .map((c) => sanitizeText(`${c.ln ? c.ln : c.ln2} ${c.content}`))
+            .join('\n'),
+        '```',
+        '',
+        'Full file content:',
+        '```',
+        sanitizedFileContent.length > 10000
+            ? `${sanitizedFileContent.slice(0, 5000)}\n... (content truncated) ...\n${sanitizedFileContent.slice(-5000)}`
+            : sanitizedFileContent,
+        '```'
+    ].join('\n');
 }
 function getAIResponse(prompt) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b;
         try {
-            if (AI_PROVIDER === 'openai' && openai) {
+            if (config.AI_PROVIDER === 'openai' && exports.openai) {
                 const queryConfig = {
-                    model: OPENAI_API_MODEL,
+                    model: config.OPENAI_API_MODEL,
                     temperature: 0.2,
                     max_tokens: 700,
                     top_p: 1,
                     frequency_penalty: 0,
                     presence_penalty: 0
                 };
-                const response = yield openai.chat.completions.create(Object.assign(Object.assign({}, queryConfig), { response_format: { type: "json_object" }, messages: [
+                const response = yield exports.openai.chat.completions.create(Object.assign(Object.assign({}, queryConfig), { response_format: { type: "json_object" }, messages: [
                         {
                             role: "system",
                             content: prompt,
@@ -223,9 +272,9 @@ function getAIResponse(prompt) {
                 }
                 return JSON.parse(jsonStr).reviews;
             }
-            else if (AI_PROVIDER === 'anthropic' && anthropic) {
-                const response = yield anthropic.messages.create({
-                    model: ANTHROPIC_API_MODEL,
+            else if (config.AI_PROVIDER === 'anthropic' && exports.anthropic) {
+                const response = yield exports.anthropic.messages.create({
+                    model: config.ANTHROPIC_API_MODEL,
                     max_tokens: 1024,
                     temperature: 0.2,
                     messages: [
@@ -249,7 +298,7 @@ function getAIResponse(prompt) {
                 return JSON.parse(jsonStr).reviews;
             }
             else {
-                throw new Error(`Invalid AI provider: ${AI_PROVIDER}`);
+                throw new Error(`Invalid AI provider: ${config.AI_PROVIDER}`);
             }
         }
         catch (error) {
@@ -263,16 +312,20 @@ function createComment(file, chunk, aiResponses) {
         if (!file.to) {
             return [];
         }
+        // Sanitize file path and review comment
+        const sanitizeText = (text) => text.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+        const sanitizedPath = sanitizeText(file.to);
+        const sanitizedComment = sanitizeText(aiResponse.reviewComment);
         return {
-            body: aiResponse.reviewComment,
-            path: file.to,
+            body: sanitizedComment,
+            path: sanitizedPath,
             line: Number(aiResponse.lineNumber),
         };
     });
 }
 function createReviewComment(owner, repo, pull_number, comments) {
     return __awaiter(this, void 0, void 0, function* () {
-        yield octokit.pulls.createReview({
+        yield exports.octokit.pulls.createReview({
             owner,
             repo,
             pull_number,
@@ -281,61 +334,64 @@ function createReviewComment(owner, repo, pull_number, comments) {
         });
     });
 }
-function main() {
-    return __awaiter(this, void 0, void 0, function* () {
-        const prDetails = yield getPRDetails();
-        let diff;
-        const eventPath = process.env.GITHUB_EVENT_PATH;
-        if (!eventPath) {
-            throw new Error('GITHUB_EVENT_PATH environment variable is not set');
-        }
-        const eventData = JSON.parse((0, fs_1.readFileSync)(eventPath, "utf8"));
-        if (eventData.action === "opened") {
-            diff = yield getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
-        }
-        else if (eventData.action === "review_requested") {
-            diff = yield getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
-        }
-        else if (eventData.action === "synchronize") {
-            const newBaseSha = eventData.before;
-            const newHeadSha = eventData.after;
-            const response = yield octokit.repos.compareCommits({
-                headers: {
-                    accept: "application/vnd.github.v3.diff",
-                },
-                owner: prDetails.owner,
-                repo: prDetails.repo,
-                base: newBaseSha,
-                head: newHeadSha,
+// Only run main when executed directly (not imported)
+if (require.main === require.cache[eval('__filename')]) {
+    function main() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const prDetails = yield getPRDetails();
+            let diff;
+            const eventPath = process.env.GITHUB_EVENT_PATH;
+            if (!eventPath) {
+                throw new Error('GITHUB_EVENT_PATH environment variable is not set');
+            }
+            const eventData = JSON.parse((0, fs_1.readFileSync)(eventPath, "utf8"));
+            if (eventData.action === "opened") {
+                diff = yield getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+            }
+            else if (eventData.action === "review_requested") {
+                diff = yield getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+            }
+            else if (eventData.action === "synchronize") {
+                const newBaseSha = eventData.before;
+                const newHeadSha = eventData.after;
+                const response = yield exports.octokit.repos.compareCommits({
+                    headers: {
+                        accept: "application/vnd.github.v3.diff",
+                    },
+                    owner: prDetails.owner,
+                    repo: prDetails.repo,
+                    base: newBaseSha,
+                    head: newHeadSha,
+                });
+                diff = String(response.data);
+            }
+            else {
+                console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
+                return;
+            }
+            if (!diff) {
+                console.log("No diff found");
+                return;
+            }
+            const parsedDiff = (0, parse_diff_1.default)(diff);
+            const excludePatterns = core
+                .getInput("exclude")
+                .split(",")
+                .map((s) => s.trim());
+            const filteredDiff = parsedDiff.filter((file) => {
+                return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
             });
-            diff = String(response.data);
-        }
-        else {
-            console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
-            return;
-        }
-        if (!diff) {
-            console.log("No diff found");
-            return;
-        }
-        const parsedDiff = (0, parse_diff_1.default)(diff);
-        const excludePatterns = core
-            .getInput("exclude")
-            .split(",")
-            .map((s) => s.trim());
-        const filteredDiff = parsedDiff.filter((file) => {
-            return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
+            const comments = yield analyzeCode(filteredDiff, prDetails, config.prIgnore);
+            if (comments.length > 0) {
+                yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+            }
         });
-        const comments = yield analyzeCode(filteredDiff, prDetails, prIgnore);
-        if (comments.length > 0) {
-            yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
-        }
+    }
+    main().catch((error) => {
+        console.error("Error:", error);
+        process.exit(1);
     });
 }
-main().catch((error) => {
-    console.error("Error:", error);
-    process.exit(1);
-});
 
 
 /***/ }),

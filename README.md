@@ -91,6 +91,64 @@ your chosen AI provider's API. It then generates review comments based on the AI
 
 Choose the provider that best fits your needs based on these characteristics.
 
+## Local Testing
+
+You can test the AI code review functionality locally without setting up the GitHub Action by using the provided `test.ts` script. This is useful for testing the reviewer on any public GitHub PR.
+
+### Setup for Local Testing
+
+1. Set up the required environment variables:
+```bash
+# Required
+export GITHUB_TOKEN="your-github-token"  # Personal access token with repo access
+
+# Choose your AI provider
+export AI_PROVIDER="openai"  # or "anthropic"
+
+# If using OpenAI
+export OPENAI_API_KEY="your-openai-api-key"
+export OPENAI_API_MODEL="gpt-4"  # Optional: defaults to gpt-4
+
+# If using Anthropic
+export ANTHROPIC_API_KEY="your-anthropic-api-key"
+export ANTHROPIC_API_MODEL="claude-3-opus-20240229"  # Optional: defaults to claude-3-opus-20240229
+
+# Optional configuration
+export ROLE="Senior Software Engineer"  # Optional: defaults to "Senior Software Engineer"
+export TECH_STACK="TypeScript, JavaScript, Node.js"  # Optional: defaults to "TypeScript, JavaScript, Node.js"
+export PR_IGNORE="*.md,*.json"  # Optional: files to ignore, comma-separated
+export EXCLUDE="*.test.ts,*.spec.ts"  # Optional: exclude patterns, comma-separated
+```
+
+2. Install dependencies and build the project:
+```bash
+npm install
+npm run build
+```
+
+3. Run the test script with a GitHub PR URL:
+```bash
+npx ts-node src/test.ts https://github.com/owner/repo/pull/123
+```
+
+The script will analyze the PR and write the results to `pr-review-output.json` in the current directory. The output file contains:
+```json
+{
+  "pr": {
+    "url": "https://github.com/owner/repo/pull/123",
+    "title": "PR title",
+    "description": "PR description"
+  },
+  "reviews": [
+    {
+      "path": "src/file.ts",
+      "line": 42,
+      "body": "Review comment for this line"
+    }
+  ]
+}
+```
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues or pull requests to improve the AI Code Reviewer GitHub

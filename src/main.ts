@@ -6,35 +6,46 @@ import { Octokit } from "@octokit/rest";
 import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
 
-const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
-const AI_PROVIDER: string = core.getInput("AI_PROVIDER");
-const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
-const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
-const ANTHROPIC_API_KEY: string = core.getInput("ANTHROPIC_API_KEY");
-const ANTHROPIC_API_MODEL: string = core.getInput("ANTHROPIC_API_MODEL");
-const role: string = core.getInput("role");
-const tech_stack: string = core.getInput("tech_stack");
-const prIgnore: string = core.getMultilineInput("pr_ignore").map(customPrompt => `- ${customPrompt}`).join("\n")
+// Configuration can come from GitHub Actions or environment variables
+export function getConfig() {
+  const isGitHubAction = !!process.env.GITHUB_ACTIONS;
+
+  return {
+    GITHUB_TOKEN: isGitHubAction ? core.getInput("GITHUB_TOKEN") : process.env.GITHUB_TOKEN,
+    AI_PROVIDER: isGitHubAction ? core.getInput("AI_PROVIDER") : process.env.AI_PROVIDER || 'openai',
+    OPENAI_API_KEY: isGitHubAction ? core.getInput("OPENAI_API_KEY") : process.env.OPENAI_API_KEY,
+    OPENAI_API_MODEL: isGitHubAction ? core.getInput("OPENAI_API_MODEL") : process.env.OPENAI_API_MODEL || 'gpt-4',
+    ANTHROPIC_API_KEY: isGitHubAction ? core.getInput("ANTHROPIC_API_KEY") : process.env.ANTHROPIC_API_KEY,
+    ANTHROPIC_API_MODEL: isGitHubAction ? core.getInput("ANTHROPIC_API_MODEL") : process.env.ANTHROPIC_API_MODEL || 'claude-3-opus-20240229',
+    role: isGitHubAction ? core.getInput("role") : process.env.ROLE || 'Senior Software Engineer',
+    tech_stack: isGitHubAction ? core.getInput("tech_stack") : process.env.TECH_STACK || 'TypeScript, JavaScript, Node.js',
+    prIgnore: isGitHubAction 
+      ? core.getMultilineInput("pr_ignore").map(customPrompt => `- ${customPrompt}`).join("\n")
+      : (process.env.PR_IGNORE || '').split(',').map(line => `- ${line.trim()}`).join('\n')
+  };
+}
+
+const config = getConfig();
 
 // Validate API keys based on provider
-if (AI_PROVIDER === 'openai' && !OPENAI_API_KEY) {
+if (config.AI_PROVIDER === 'openai' && !config.OPENAI_API_KEY) {
   throw new Error('OPENAI_API_KEY is required when using OpenAI provider');
 }
-if (AI_PROVIDER === 'anthropic' && !ANTHROPIC_API_KEY) {
+if (config.AI_PROVIDER === 'anthropic' && !config.ANTHROPIC_API_KEY) {
   throw new Error('ANTHROPIC_API_KEY is required when using Anthropic provider');
 }
 
-const octokit = new Octokit({ auth: GITHUB_TOKEN });
+export const octokit = new Octokit({ auth: config.GITHUB_TOKEN });
 
-const openai = AI_PROVIDER === 'openai' ? new OpenAI({
-  apiKey: OPENAI_API_KEY,
+export const openai = config.AI_PROVIDER === 'openai' ? new OpenAI({
+  apiKey: config.OPENAI_API_KEY,
 }) : null;
 
-const anthropic = AI_PROVIDER === 'anthropic' ? new Anthropic({
-  apiKey: ANTHROPIC_API_KEY,
+export const anthropic = config.AI_PROVIDER === 'anthropic' ? new Anthropic({
+  apiKey: config.ANTHROPIC_API_KEY,
 }) : null;
 
-interface PRDetails {
+export interface PRDetails {
   owner: string;
   repo: string;
   pull_number: number;
@@ -42,29 +53,51 @@ interface PRDetails {
   description: string;
 }
 
-async function getPRDetails(): Promise<PRDetails> {
-  const eventPath = process.env.GITHUB_EVENT_PATH;
-  if (!eventPath) {
-    throw new Error('GITHUB_EVENT_PATH environment variable is not set');
+export async function getPRDetails(prUrl?: string): Promise<PRDetails> {
+  if (prUrl) {
+    // Parse PR URL format: https://github.com/owner/repo/pull/number
+    const match = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+    if (!match) {
+      throw new Error('Invalid GitHub PR URL. Format should be: https://github.com/owner/repo/pull/number');
+    }
+    const [, owner, repo, pullNumber] = match;
+    const prResponse = await octokit.pulls.get({
+      owner,
+      repo,
+      pull_number: parseInt(pullNumber, 10),
+    });
+    return {
+      owner,
+      repo,
+      pull_number: parseInt(pullNumber, 10),
+      title: prResponse.data.title ?? "",
+      description: prResponse.data.body ?? "",
+    };
+  } else {
+    // GitHub Actions context
+    const eventPath = process.env.GITHUB_EVENT_PATH;
+    if (!eventPath) {
+      throw new Error('GITHUB_EVENT_PATH environment variable is not set');
+    }
+    const { repository, number } = JSON.parse(
+      readFileSync(eventPath, "utf8")
+    );
+    const prResponse = await octokit.pulls.get({
+      owner: repository.owner.login,
+      repo: repository.name,
+      pull_number: number,
+    });
+    return {
+      owner: repository.owner.login,
+      repo: repository.name,
+      pull_number: number,
+      title: prResponse.data.title ?? "",
+      description: prResponse.data.body ?? "",
+    };
   }
-  const { repository, number } = JSON.parse(
-    readFileSync(eventPath, "utf8")
-  );
-  const prResponse = await octokit.pulls.get({
-    owner: repository.owner.login,
-    repo: repository.name,
-    pull_number: number,
-  });
-  return {
-    owner: repository.owner.login,
-    repo: repository.name,
-    pull_number: number,
-    title: prResponse.data.title ?? "",
-    description: prResponse.data.body ?? "",
-  };
 }
 
-async function getFileContent(
+export async function getFileContent(
   owner: string,
   repo: string,
   path: string,
@@ -91,7 +124,7 @@ async function getFileContent(
   }
 }
 
-async function getDiff(
+export async function getDiff(
   owner: string,
   repo: string,
   pull_number: number
@@ -106,7 +139,7 @@ async function getDiff(
   return response.data;
 }
 
-async function analyzeCode(
+export async function analyzeCode(
   parsedDiff: File[],
   prDetails: PRDetails,
   prIgnore: string
@@ -138,68 +171,76 @@ async function analyzeCode(
   return comments;
 }
 
-function createPrompt(
+export function createPrompt(
   file: File, 
   chunk: Chunk, 
   prDetails: PRDetails, 
   prIgnore: string,
   fullFileContent: string | null
 ): string {
-  return `You are a ${role}. Your task is to review pull requests. Project's tech stack is ${tech_stack}.
-  Instructions:
-- Do not wrap the json codes in JSON markers
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
-- Do not give positive comments or compliments.
-- If suggestion has similar changes already in the code, don't mention that.
-- Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
-- Write the comment in GitHub Markdown format.
-- Use the given description only for the overall context and only comment the code.
-- IMPORTANT: NEVER suggest adding comments to the code.
-
-Ignore these items from the PR:
-${prIgnore}
-
-Review the following code diff in the file "${
-    file.to
-  }" and take the pull request title and description into account when writing the response.
+  // Sanitize inputs to prevent control characters
+  const sanitizeText = (text: string) => text.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
   
-Pull request title: ${prDetails.title}
-Pull request description:
-
----
-${prDetails.description}
----
-
-Git diff to review:
-
-\`\`\`diff
-${chunk.content}
-${chunk.changes
-  // @ts-expect-error - ln and ln2 exists where needed
-  .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
-  .join("\n")}
-\`\`\`
-
-
-Full file content:
-\`\`\`
-${fullFileContent ? (fullFileContent.length > 10000 ? 
-  fullFileContent.slice(0, 5000) + '\n... (content truncated) ...\n' + fullFileContent.slice(-5000) 
-  : fullFileContent) 
-  : 'File content not available'}
-\`\`\`
-
-`;
+  const sanitizedTitle = sanitizeText(prDetails.title);
+  const sanitizedDescription = sanitizeText(prDetails.description);
+  const sanitizedContent = chunk.content ? sanitizeText(chunk.content) : '';
+  const sanitizedFileContent = fullFileContent ? sanitizeText(fullFileContent) : 'File content not available';
+  const sanitizedFilePath = file.to ? sanitizeText(file.to) : '';
+  
+  // Sanitize all user-provided inputs
+  const sanitizedRole = sanitizeText(config.role);
+  const sanitizedTechStack = sanitizeText(config.tech_stack);
+  const sanitizedPrIgnore = sanitizeText(prIgnore);
+  
+  return [
+    `You are a ${sanitizedRole}. Your task is to review pull requests. Project's tech stack is ${sanitizedTechStack}.`,
+    'Instructions:',
+    '- Do not wrap the json codes in JSON markers',
+    '- Provide the response in following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>"}]}',
+    '- Do not give positive comments or compliments.',
+    '- If suggestion has similar changes already in the code, don\'t mention that.',
+    '- Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.',
+    '- Write the comment in GitHub Markdown format.',
+    '- Use the given description only for the overall context and only comment the code.',
+    '- IMPORTANT: NEVER suggest adding comments to the code.',
+    '',
+    'Ignore these items from the PR:',
+    sanitizedPrIgnore,
+    '',
+    `Review the following code diff in the file "${sanitizedFilePath}" and take the pull request title and description into account when writing the response.`,
+    '',
+    `Pull request title: ${sanitizedTitle}`,
+    'Pull request description:',
+    '---',
+    sanitizedDescription,
+    '---',
+    '',
+    'Git diff to review:',
+    '```diff',
+    sanitizedContent,
+    chunk.changes
+      // @ts-expect-error - ln and ln2 exists where needed
+      .map((c) => sanitizeText(`${c.ln ? c.ln : c.ln2} ${c.content}`))
+      .join('\n'),
+    '```',
+    '',
+    'Full file content:',
+    '```',
+    sanitizedFileContent.length > 10000 
+      ? `${sanitizedFileContent.slice(0, 5000)}\n... (content truncated) ...\n${sanitizedFileContent.slice(-5000)}`
+      : sanitizedFileContent,
+    '```'
+  ].join('\n');
 }
 
-async function getAIResponse(prompt: string): Promise<Array<{
+export async function getAIResponse(prompt: string): Promise<Array<{
   lineNumber: string;
   reviewComment: string;
 }> | null> {
   try {
-    if (AI_PROVIDER === 'openai' && openai) {
+    if (config.AI_PROVIDER === 'openai' && openai) {
       const queryConfig = {
-        model: OPENAI_API_MODEL,
+        model: config.OPENAI_API_MODEL,
         temperature: 0.2,
         max_tokens: 700,
         top_p: 1,
@@ -225,9 +266,9 @@ async function getAIResponse(prompt: string): Promise<Array<{
         jsonStr = res.replace(/^```json\s*/, '').replace(/\s*```\s*$/, '');
       }
       return JSON.parse(jsonStr).reviews;
-    } else if (AI_PROVIDER === 'anthropic' && anthropic) {
+    } else if (config.AI_PROVIDER === 'anthropic' && anthropic) {
       const response = await anthropic.messages.create({
-        model: ANTHROPIC_API_MODEL,
+        model: config.ANTHROPIC_API_MODEL,
         max_tokens: 1024,
         temperature: 0.2,
         messages: [
@@ -252,7 +293,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
       }
       return JSON.parse(jsonStr).reviews;
     } else {
-      throw new Error(`Invalid AI provider: ${AI_PROVIDER}`);
+      throw new Error(`Invalid AI provider: ${config.AI_PROVIDER}`);
     }
   } catch (error) {
     console.error("Error:", error);
@@ -260,7 +301,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
   }
 }
 
-function createComment(
+export function createComment(
   file: File,
   chunk: Chunk,
   aiResponses: Array<{
@@ -272,15 +313,19 @@ function createComment(
     if (!file.to) {
       return [];
     }
+    // Sanitize file path and review comment
+    const sanitizeText = (text: string) => text.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+    const sanitizedPath = sanitizeText(file.to);
+    const sanitizedComment = sanitizeText(aiResponse.reviewComment);
     return {
-      body: aiResponse.reviewComment,
-      path: file.to,
+      body: sanitizedComment,
+      path: sanitizedPath,
       line: Number(aiResponse.lineNumber),
     };
   });
 }
 
-async function createReviewComment(
+export async function createReviewComment(
   owner: string,
   repo: string,
   pull_number: number,
@@ -295,79 +340,82 @@ async function createReviewComment(
   });
 }
 
-async function main() {
-  const prDetails = await getPRDetails();
-  let diff: string | null;
-  const eventPath = process.env.GITHUB_EVENT_PATH;
-  if (!eventPath) {
-    throw new Error('GITHUB_EVENT_PATH environment variable is not set');
-  }
-  const eventData = JSON.parse(
-    readFileSync(eventPath, "utf8")
-  );
-
-  if (eventData.action === "opened") {
-    diff = await getDiff(
-      prDetails.owner,
-      prDetails.repo,
-      prDetails.pull_number
+// Only run main when executed directly (not imported)
+if (require.main === module) {
+  async function main() {
+    const prDetails = await getPRDetails();
+    let diff: string | null;
+    const eventPath = process.env.GITHUB_EVENT_PATH;
+    if (!eventPath) {
+      throw new Error('GITHUB_EVENT_PATH environment variable is not set');
+    }
+    const eventData = JSON.parse(
+      readFileSync(eventPath, "utf8")
     );
-  } else if (eventData.action === "review_requested") {
-    diff = await getDiff(
-      prDetails.owner,
-      prDetails.repo,
-      prDetails.pull_number
-    );
-  } else if (eventData.action === "synchronize") {
-    const newBaseSha = eventData.before;
-    const newHeadSha = eventData.after;
 
-    const response = await octokit.repos.compareCommits({
-      headers: {
-        accept: "application/vnd.github.v3.diff",
-      },
-      owner: prDetails.owner,
-      repo: prDetails.repo,
-      base: newBaseSha,
-      head: newHeadSha,
+    if (eventData.action === "opened") {
+      diff = await getDiff(
+        prDetails.owner,
+        prDetails.repo,
+        prDetails.pull_number
+      );
+    } else if (eventData.action === "review_requested") {
+      diff = await getDiff(
+        prDetails.owner,
+        prDetails.repo,
+        prDetails.pull_number
+      );
+    } else if (eventData.action === "synchronize") {
+      const newBaseSha = eventData.before;
+      const newHeadSha = eventData.after;
+
+      const response = await octokit.repos.compareCommits({
+        headers: {
+          accept: "application/vnd.github.v3.diff",
+        },
+        owner: prDetails.owner,
+        repo: prDetails.repo,
+        base: newBaseSha,
+        head: newHeadSha,
+      });
+
+      diff = String(response.data);
+    } else {
+      console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
+      return;
+    }
+
+    if (!diff) {
+      console.log("No diff found");
+      return;
+    }
+
+    const parsedDiff = parseDiff(diff);
+
+    const excludePatterns = core
+      .getInput("exclude")
+      .split(",")
+      .map((s) => s.trim());
+
+    const filteredDiff = parsedDiff.filter((file) => {
+      return !excludePatterns.some((pattern) =>
+        minimatch(file.to ?? "", pattern)
+      );
     });
 
-    diff = String(response.data);
-  } else {
-    console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
-    return;
+    const comments = await analyzeCode(filteredDiff, prDetails, config.prIgnore);
+    if (comments.length > 0) {
+      await createReviewComment(
+        prDetails.owner,
+        prDetails.repo,
+        prDetails.pull_number,
+        comments
+      );
+    }
   }
 
-  if (!diff) {
-    console.log("No diff found");
-    return;
-  }
-
-  const parsedDiff = parseDiff(diff);
-
-  const excludePatterns = core
-    .getInput("exclude")
-    .split(",")
-    .map((s) => s.trim());
-
-  const filteredDiff = parsedDiff.filter((file) => {
-    return !excludePatterns.some((pattern) =>
-      minimatch(file.to ?? "", pattern)
-    );
+  main().catch((error) => {
+    console.error("Error:", error);
+    process.exit(1);
   });
-
-  const comments = await analyzeCode(filteredDiff, prDetails, prIgnore);
-  if (comments.length > 0) {
-    await createReviewComment(
-      prDetails.owner,
-      prDetails.repo,
-      prDetails.pull_number,
-      comments
-    );
-  }
 }
-
-main().catch((error) => {
-  console.error("Error:", error);
-  process.exit(1);
-});
