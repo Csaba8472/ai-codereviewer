@@ -55,7 +55,7 @@ jobs:
           
           # If using Anthropic
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_API_MODEL: "claude-2" # Optional: defaults to "claude-2"
+          ANTHROPIC_API_MODEL: "claude-3-5-sonnet-20241022" # Optional: defaults to "claude-3-5-sonnet-20241022"
           
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
 ```
@@ -70,7 +70,7 @@ jobs:
 
 6. Commit the changes to your repository, and AI Code Reviewer will start working on your future pull requests.
 
-7. Execute `bun run package` to generate the package.
+7. Execute `npm run build` `npm run package` to generate the package.
 
 ## How It Works
 
@@ -154,7 +154,7 @@ The script will analyze the PR and write the results to `pr-review-output.json` 
 Contributions are welcome! Please feel free to submit issues or pull requests to improve the AI Code Reviewer GitHub
 Action.
 
-Let the maintainer generate the final package (`yarn build` & `yarn package`).
+Let the maintainer generate the final package (`npm run build` & `npm run package`).
 
 ## License
 
