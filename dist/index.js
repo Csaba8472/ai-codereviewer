@@ -75,7 +75,11 @@ const anthropic = AI_PROVIDER === 'anthropic' ? new sdk_1.default({
 function getPRDetails() {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b;
-        const { repository, number } = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH || "", "utf8"));
+        const eventPath = process.env.GITHUB_EVENT_PATH;
+        if (!eventPath) {
+            throw new Error('GITHUB_EVENT_PATH environment variable is not set');
+        }
+        const { repository, number } = JSON.parse((0, fs_1.readFileSync)(eventPath, "utf8"));
         const prResponse = yield octokit.pulls.get({
             owner: repository.owner.login,
             repo: repository.name,
@@ -212,12 +216,12 @@ function getAIResponse(prompt) {
                         },
                     ] }));
                 const res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
+                let jsonStr = res;
                 if (res.startsWith("```json")) {
-                    return JSON.parse(res.slice(7, -3)).reviews;
+                    // Remove the markdown code block markers and any trailing whitespace
+                    jsonStr = res.replace(/^```json\s*/, '').replace(/\s*```\s*$/, '');
                 }
-                else {
-                    return JSON.parse(res).reviews;
-                }
+                return JSON.parse(jsonStr).reviews;
             }
             else if (AI_PROVIDER === 'anthropic' && anthropic) {
                 const response = yield anthropic.messages.create({
@@ -227,11 +231,7 @@ function getAIResponse(prompt) {
                     messages: [
                         {
                             "role": "user",
-                            "content": "You are an AI code reviewer. You must respond in JSON format."
-                        },
-                        {
-                            "role": "assistant",
-                            "content": "Here is the JSON requested:\n{"
+                            "content": prompt
                         }
                     ],
                 });
@@ -241,12 +241,12 @@ function getAIResponse(prompt) {
                     throw new Error('Unexpected response type from Anthropic API');
                 }
                 const res = content.text.trim();
+                let jsonStr = res;
                 if (res.startsWith("```json")) {
-                    return JSON.parse(res.slice(7, -3)).reviews;
+                    // Remove the markdown code block markers and any trailing whitespace
+                    jsonStr = res.replace(/^```json\s*/, '').replace(/\s*```\s*$/, '');
                 }
-                else {
-                    return JSON.parse(res).reviews;
-                }
+                return JSON.parse(jsonStr).reviews;
             }
             else {
                 throw new Error(`Invalid AI provider: ${AI_PROVIDER}`);
@@ -283,10 +283,13 @@ function createReviewComment(owner, repo, pull_number, comments) {
 }
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
         const prDetails = yield getPRDetails();
         let diff;
-        const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));
+        const eventPath = process.env.GITHUB_EVENT_PATH;
+        if (!eventPath) {
+            throw new Error('GITHUB_EVENT_PATH environment variable is not set');
+        }
+        const eventData = JSON.parse((0, fs_1.readFileSync)(eventPath, "utf8"));
         if (eventData.action === "opened") {
             diff = yield getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
         }
