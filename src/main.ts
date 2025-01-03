@@ -43,8 +43,12 @@ interface PRDetails {
 }
 
 async function getPRDetails(): Promise<PRDetails> {
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (!eventPath) {
+    throw new Error('GITHUB_EVENT_PATH environment variable is not set');
+  }
   const { repository, number } = JSON.parse(
-    readFileSync(process.env.GITHUB_EVENT_PATH || "", "utf8")
+    readFileSync(eventPath, "utf8")
   );
   const prResponse = await octokit.pulls.get({
     owner: repository.owner.login,
@@ -215,11 +219,12 @@ async function getAIResponse(prompt: string): Promise<Array<{
       });
 
       const res = response.choices[0].message?.content?.trim() || "{}";
+      let jsonStr = res;
       if (res.startsWith("```json")) {
-        return JSON.parse(res.slice(7, -3)).reviews;
-      } else {
-        return JSON.parse(res).reviews;
+        // Remove the markdown code block markers and any trailing whitespace
+        jsonStr = res.replace(/^```json\s*/, '').replace(/\s*```\s*$/, '');
       }
+      return JSON.parse(jsonStr).reviews;
     } else if (AI_PROVIDER === 'anthropic' && anthropic) {
       const response = await anthropic.messages.create({
         model: ANTHROPIC_API_MODEL,
@@ -228,12 +233,8 @@ async function getAIResponse(prompt: string): Promise<Array<{
         messages: [
           {
             "role": "user", 
-            "content": "You are an AI code reviewer. You must respond in JSON format."
-        },
-        {
-            "role": "assistant",
-            "content": "Here is the JSON requested:\n{"
-        }
+            "content": prompt
+          }
         ],
       });
 
@@ -244,11 +245,12 @@ async function getAIResponse(prompt: string): Promise<Array<{
       }
 
       const res = content.text.trim();
+      let jsonStr = res;
       if (res.startsWith("```json")) {
-        return JSON.parse(res.slice(7, -3)).reviews;
-      } else {
-        return JSON.parse(res).reviews;
+        // Remove the markdown code block markers and any trailing whitespace
+        jsonStr = res.replace(/^```json\s*/, '').replace(/\s*```\s*$/, '');
       }
+      return JSON.parse(jsonStr).reviews;
     } else {
       throw new Error(`Invalid AI provider: ${AI_PROVIDER}`);
     }
@@ -296,8 +298,12 @@ async function createReviewComment(
 async function main() {
   const prDetails = await getPRDetails();
   let diff: string | null;
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (!eventPath) {
+    throw new Error('GITHUB_EVENT_PATH environment variable is not set');
+  }
   const eventData = JSON.parse(
-    readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
+    readFileSync(eventPath, "utf8")
   );
 
   if (eventData.action === "opened") {
